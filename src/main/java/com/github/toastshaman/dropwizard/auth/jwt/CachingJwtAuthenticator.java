@@ -7,21 +7,20 @@ import com.google.common.cache.Cache;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheBuilderSpec;
 import com.google.common.cache.CacheStats;
+import com.nimbusds.jwt.JWTClaimsSet;
 import io.dropwizard.auth.AuthenticationException;
 import io.dropwizard.auth.Authenticator;
-import org.jose4j.jwt.consumer.JwtContext;
 
 import java.security.Principal;
-import java.util.AbstractMap.SimpleEntry;
 import java.util.Optional;
 import java.util.function.Predicate;
 
 import static com.codahale.metrics.MetricRegistry.name;
 
-public class CachingJwtAuthenticator<P extends Principal> implements Authenticator<JwtContext, P> {
+public class CachingJwtAuthenticator<P extends Principal> implements Authenticator<JWTClaimsSet, P> {
 
-    private final Authenticator<JwtContext, P> authenticator;
-    private final Cache<String, SimpleEntry<JwtContext, Optional<P>>> cache;
+    private final Authenticator<JWTClaimsSet, P> authenticator;
+    private final Cache<JWTClaimsSet, Optional<P>> cache;
     private final Meter cacheMisses;
     private final Timer gets;
 
@@ -33,7 +32,7 @@ public class CachingJwtAuthenticator<P extends Principal> implements Authenticat
      * @param cacheSpec      a {@link CacheBuilderSpec}
      */
     public CachingJwtAuthenticator(final MetricRegistry metricRegistry,
-                                   final Authenticator<JwtContext, P> authenticator,
+                                   final Authenticator<JWTClaimsSet, P> authenticator,
                                    final CacheBuilderSpec cacheSpec) {
         this(metricRegistry, authenticator, CacheBuilder.from(cacheSpec));
     }
@@ -46,7 +45,7 @@ public class CachingJwtAuthenticator<P extends Principal> implements Authenticat
      * @param builder        a {@link CacheBuilder}
      */
     public CachingJwtAuthenticator(final MetricRegistry metricRegistry,
-                                   final Authenticator<JwtContext, P> authenticator,
+                                   final Authenticator<JWTClaimsSet, P> authenticator,
                                    final CacheBuilder<Object, Object> builder) {
         this.authenticator = authenticator;
         this.cacheMisses = metricRegistry.meter(name(authenticator.getClass(), "cache-misses"));
@@ -55,18 +54,18 @@ public class CachingJwtAuthenticator<P extends Principal> implements Authenticat
     }
 
     @Override
-    public Optional<P> authenticate(JwtContext context) throws AuthenticationException {
+    public Optional<P> authenticate(JWTClaimsSet context) throws AuthenticationException {
         final Timer.Context timer = gets.time();
         try {
-            final SimpleEntry<JwtContext, Optional<P>> cacheEntry = cache.getIfPresent(context.getJwt());
+            final Optional<P> cacheEntry = cache.getIfPresent(context);
             if (cacheEntry != null) {
-                return cacheEntry.getValue();
+                return cacheEntry;
             }
 
             cacheMisses.mark();
             final Optional<P> principal = authenticator.authenticate(context);
             if (principal.isPresent()) {
-                cache.put(context.getJwt(), new SimpleEntry<>(context, principal));
+                cache.put(context, principal);
             }
             return principal;
         }
@@ -78,8 +77,8 @@ public class CachingJwtAuthenticator<P extends Principal> implements Authenticat
      *
      * @param credentials a set of credentials
      */
-    public void invalidate(JwtContext credentials) {
-        cache.invalidate(credentials.getJwt());
+    public void invalidate(JWTClaimsSet credentials) {
+        cache.invalidate(credentials);
     }
 
     /**
@@ -87,8 +86,8 @@ public class CachingJwtAuthenticator<P extends Principal> implements Authenticat
      *
      * @param credentials a collection of credentials
      */
-    public void invalidateAll(Iterable<JwtContext> credentials) {
-        credentials.forEach(context -> cache.invalidate(context.getJwt()));
+    public void invalidateAll(Iterable<JWTClaimsSet> credentials) {
+        credentials.forEach(context -> cache.invalidate(credentials));
     }
 
     /**
@@ -96,12 +95,10 @@ public class CachingJwtAuthenticator<P extends Principal> implements Authenticat
      *
      * @param predicate a predicate to filter credentials
      */
-    public void invalidateAll(Predicate<? super JwtContext> predicate) {
-        cache.asMap().entrySet().stream()
-            .map(entry -> entry.getValue().getKey())
-            .filter(predicate::test)
-            .map(JwtContext::getJwt)
-            .forEach(cache::invalidate);
+    public void invalidateAll(Predicate<? super JWTClaimsSet> predicate) {
+        cache.asMap().keySet().stream()
+                .filter(predicate)
+                .forEach(cache::invalidate);
     }
 
     /**

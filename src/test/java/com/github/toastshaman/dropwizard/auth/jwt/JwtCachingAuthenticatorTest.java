@@ -1,24 +1,25 @@
 package com.github.toastshaman.dropwizard.auth.jwt;
 
 import com.codahale.metrics.MetricRegistry;
-import com.google.common.base.Throwables;
 import com.google.common.cache.CacheBuilderSpec;
+import com.nimbusds.jose.JWSAlgorithm;
+import com.nimbusds.jose.jwk.source.ImmutableSecret;
+import com.nimbusds.jose.jwk.source.JWKSource;
+import com.nimbusds.jose.proc.JWSKeySelector;
+import com.nimbusds.jose.proc.JWSVerificationKeySelector;
+import com.nimbusds.jose.proc.SecurityContext;
+import com.nimbusds.jwt.JWTClaimsSet;
+import com.nimbusds.jwt.proc.ConfigurableJWTProcessor;
+import com.nimbusds.jwt.proc.DefaultJWTProcessor;
 import io.dropwizard.auth.Authenticator;
 import io.dropwizard.auth.PrincipalImpl;
-import org.jose4j.jws.AlgorithmIdentifiers;
-import org.jose4j.jws.JsonWebSignature;
-import org.jose4j.jwt.JwtClaims;
-import org.jose4j.jwt.consumer.JwtConsumer;
-import org.jose4j.jwt.consumer.JwtConsumerBuilder;
-import org.jose4j.jwt.consumer.JwtContext;
-import org.jose4j.keys.HmacKey;
 import org.junit.Before;
 import org.junit.Test;
 
 import java.security.Principal;
+import java.util.Base64;
 import java.util.Optional;
 
-import static com.google.common.base.Charsets.UTF_8;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Matchers.any;
 import static org.mockito.Mockito.*;
@@ -26,61 +27,44 @@ import static org.mockito.Mockito.*;
 public class JwtCachingAuthenticatorTest {
 
     @SuppressWarnings("unchecked")
-    private final Authenticator<JwtContext, Principal> underlying = mock(Authenticator.class);
+    private final Authenticator<JWTClaimsSet, Principal> underlying = mock(Authenticator.class);
 
     private final CachingJwtAuthenticator<Principal> cached = new CachingJwtAuthenticator<>(new MetricRegistry(),
         underlying, CacheBuilderSpec.parse("maximumSize=1"));
 
-    private final String SECRET = "Po70rBeXjKDhckY9yWmhNVte/UajN8xbA==lkDvaBTeWRja0SFMzcz113d/bi3Tn";
+    private static final byte[] SECRET = Base64.getDecoder().decode("lbZXcYmcZmhrZWYq7ows3kgqeiFuhPwWsbkoNoVWYN0=");
 
-    private final JwtConsumer consumer = new JwtConsumerBuilder()
-        .setAllowedClockSkewInSeconds(30) // allow some leeway in validating time based claims to account for clock skew
-        .setRequireSubject() // the JWT must have a subject claim
-        .setExpectedIssuer("Issuer") // whom the JWT needs to have been issued by
-        .setExpectedAudience("Audience") // whom the JWT needs to have been issued by
-        .setVerificationKey(new HmacKey(SECRET.getBytes(UTF_8))) // verify the signature with the public key
-        .setRelaxVerificationKeyValidation() // relaxes key length requirement
-        .build();// create the JwtConsumer instance
+    private final ConfigurableJWTProcessor<SecurityContext> consumer;
 
-    private JwtContext tokenOne() {
-        final JwtClaims claims = new JwtClaims();
-        claims.setSubject("good-guy");
-        claims.setIssuer("Issuer");
-        claims.setAudience("Audience");
+    public JwtCachingAuthenticatorTest() {
+        this.consumer = new DefaultJWTProcessor<>();
 
-        final JsonWebSignature jws = new JsonWebSignature();
-        jws.setPayload(claims.toJson());
-        jws.setAlgorithmHeaderValue(AlgorithmIdentifiers.HMAC_SHA512);
-        jws.setKey(new HmacKey(SECRET.getBytes(UTF_8)));
-        jws.setDoKeyValidation(false);
-
-        try {
-            return consumer.process(jws.getCompactSerialization());
-        }
-        catch (Exception e) { throw Throwables.propagate(e); }
+        JWKSource<SecurityContext> keySource = new ImmutableSecret<>(SECRET);
+        JWSKeySelector<SecurityContext> keySelector = new JWSVerificationKeySelector<>(JWSAlgorithm.HS512, keySource);
+        consumer.setJWSKeySelector(keySelector);
     }
 
-    private JwtContext tokenTwo() {
-        final JwtClaims claims = new JwtClaims();
-        claims.setSubject("good-guy-two");
-        claims.setIssuer("Issuer");
-        claims.setAudience("Audience");
+    private JWTClaimsSet tokenOne() {
+        final JWTClaimsSet.Builder claims = new JWTClaimsSet.Builder();
+        claims.subject("good-guy");
+        claims.issuer("Issuer");
+        claims.audience("Audience");
 
-        final JsonWebSignature jws = new JsonWebSignature();
-        jws.setPayload(claims.toJson());
-        jws.setAlgorithmHeaderValue(AlgorithmIdentifiers.HMAC_SHA512);
-        jws.setKey(new HmacKey(SECRET.getBytes(UTF_8)));
-        jws.setDoKeyValidation(false);
+        return claims.build();
+    }
 
-        try {
-            return consumer.process(jws.getCompactSerialization());
-        }
-        catch (Exception e) { throw Throwables.propagate(e); }
+    private JWTClaimsSet tokenTwo() {
+        final JWTClaimsSet.Builder claims = new JWTClaimsSet.Builder();
+        claims.subject("good-guy-two");
+        claims.issuer("Issuer");
+        claims.audience("Audience");
+
+        return claims.build();
     }
 
     @Before
     public void setUp() throws Exception {
-        when(underlying.authenticate(any(JwtContext.class)))
+        when(underlying.authenticate(any(JWTClaimsSet.class)))
             .thenReturn(Optional.<Principal>of(new PrincipalImpl("principal")));
     }
 
@@ -89,7 +73,7 @@ public class JwtCachingAuthenticatorTest {
         assertThat(cached.authenticate(tokenOne())).isEqualTo(Optional.<Principal>of(new PrincipalImpl("principal")));
         assertThat(cached.authenticate(tokenOne())).isEqualTo(Optional.<Principal>of(new PrincipalImpl("principal")));
 
-        verify(underlying, times(1)).authenticate(any(JwtContext.class));
+        verify(underlying, times(1)).authenticate(any(JWTClaimsSet.class));
     }
 
     @Test
@@ -97,6 +81,6 @@ public class JwtCachingAuthenticatorTest {
         assertThat(cached.authenticate(tokenOne())).isEqualTo(Optional.<Principal>of(new PrincipalImpl("principal")));
         assertThat(cached.authenticate(tokenTwo())).isEqualTo(Optional.<Principal>of(new PrincipalImpl("principal")));
 
-        verify(underlying, times(2)).authenticate(any(JwtContext.class));
+        verify(underlying, times(2)).authenticate(any(JWTClaimsSet.class));
     }
 }

@@ -6,7 +6,7 @@
 
     <groupId>com.github.toastshaman</groupId>
     <artifactId>dropwizard-auth-jwt</artifactId>
-    <version>1.1.2-0</version>
+    <version>1.2.0</version>
     <name>dropwizard-auth-jwt</name>
     <description>
         An implementation of the JSON Web Token (JWT) draft-ietf-oauth-json-web-token-20 for Dropwizard.
@@ -16,7 +16,7 @@
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
-        <dropwizard.version>1.1.2</dropwizard.version>
+        <dropwizard.version>1.3.7</dropwizard.version>
     </properties>
 
     <licenses>
@@ -37,6 +37,16 @@
             </roles>
             <organization>toastshaman.github.io</organization>
             <organizationUrl>https://toastshaman.github.io</organizationUrl>
+        </developer>
+        <developer>
+            <name>Michael Barnwell</name>
+            <email>michael@doordeck.com</email>
+            <timezone>0</timezone>
+            <roles>
+                <role>committer</role>
+            </roles>
+            <organization>Doordeck Limited</organization>
+            <organizationUrl>https://github.com/doordeck/</organizationUrl>
         </developer>
     </developers>
 
@@ -73,35 +83,30 @@
         <dependency>
             <groupId>io.dropwizard</groupId>
             <artifactId>dropwizard-auth</artifactId>
-            <version>${dropwizard.version}</version>
         </dependency>
         <dependency>
-            <groupId>org.bitbucket.b_c</groupId>
-            <artifactId>jose4j</artifactId>
-            <version>0.6.0</version>
+            <groupId>com.nimbusds</groupId>
+            <artifactId>nimbus-jose-jwt</artifactId>
+            <version>6.2</version>
         </dependency>
         <dependency>
             <groupId>junit</groupId>
             <artifactId>junit</artifactId>
-            <version>4.12</version>
             <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.assertj</groupId>
             <artifactId>assertj-core</artifactId>
-            <version>3.4.1</version>
             <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.assertj</groupId>
             <artifactId>assertj-guava</artifactId>
-            <version>3.0.0</version>
             <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.mockito</groupId>
             <artifactId>mockito-core</artifactId>
-            <version>1.10.19</version>
             <scope>test</scope>
         </dependency>
         <dependency>

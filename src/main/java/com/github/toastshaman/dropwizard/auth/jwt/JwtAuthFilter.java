@@ -1,11 +1,12 @@
 package com.github.toastshaman.dropwizard.auth.jwt;
 
+import com.nimbusds.jose.JOSEException;
+import com.nimbusds.jose.proc.BadJOSEException;
+import com.nimbusds.jwt.JWTClaimsSet;
+import com.nimbusds.jwt.proc.JWTProcessor;
 import io.dropwizard.auth.AuthFilter;
 import io.dropwizard.auth.AuthenticationException;
 import io.dropwizard.auth.Authenticator;
-import org.jose4j.jwt.consumer.InvalidJwtException;
-import org.jose4j.jwt.consumer.JwtConsumer;
-import org.jose4j.jwt.consumer.JwtContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -17,8 +18,8 @@ import javax.ws.rs.container.ContainerRequestContext;
 import javax.ws.rs.core.Cookie;
 import javax.ws.rs.core.MultivaluedMap;
 import javax.ws.rs.core.SecurityContext;
-import java.io.IOException;
 import java.security.Principal;
+import java.text.ParseException;
 import java.util.Map;
 import java.util.Optional;
 
@@ -26,25 +27,25 @@ import static com.google.common.base.Preconditions.checkNotNull;
 import static javax.ws.rs.core.HttpHeaders.AUTHORIZATION;
 
 @Priority(Priorities.AUTHENTICATION)
-public class JwtAuthFilter<P extends Principal> extends AuthFilter<JwtContext, P> {
+public class JwtAuthFilter<P extends Principal> extends AuthFilter<JWTClaimsSet, P> {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(JwtAuthFilter.class);
 
-    private final JwtConsumer consumer;
+    private final JWTProcessor<com.nimbusds.jose.proc.SecurityContext> consumer;
     private final String cookieName;
 
-    private JwtAuthFilter(JwtConsumer consumer, String cookieName) {
+    private JwtAuthFilter(JWTProcessor<com.nimbusds.jose.proc.SecurityContext> consumer, String cookieName) {
         this.consumer = consumer;
         this.cookieName = cookieName;
     }
 
     @Override
-    public void filter(final ContainerRequestContext requestContext) throws IOException {
+    public void filter(final ContainerRequestContext requestContext) {
         final Optional<String> optionalToken = getTokenFromCookieOrHeader(requestContext);
 
         if (optionalToken.isPresent()) {
             try {
-                final JwtContext jwtContext = verifyToken(optionalToken.get());
+                final JWTClaimsSet jwtContext = verifyToken(optionalToken.get());
                 final Optional<P> principal = authenticator.authenticate(jwtContext);
 
                 if (principal.isPresent()) {
@@ -73,7 +74,7 @@ public class JwtAuthFilter<P extends Principal> extends AuthFilter<JwtContext, P
                     });
                     return;
                 }
-            } catch (InvalidJwtException ex) {
+            } catch (JOSEException | BadJOSEException | ParseException ex) {
                 LOGGER.warn("Error decoding credentials: " + ex.getMessage(), ex);
             } catch (AuthenticationException ex) {
                 LOGGER.warn("Error authenticating credentials", ex);
@@ -84,8 +85,8 @@ public class JwtAuthFilter<P extends Principal> extends AuthFilter<JwtContext, P
         throw new WebApplicationException(unauthorizedHandler.buildResponse(prefix, realm));
     }
 
-    private JwtContext verifyToken(String rawToken) throws InvalidJwtException {
-        return consumer.process(rawToken);
+    private JWTClaimsSet verifyToken(String rawToken) throws JOSEException, BadJOSEException, ParseException {
+        return consumer.process(rawToken, null);
     }
 
     private Optional<String> getTokenFromCookieOrHeader(ContainerRequestContext requestContext) {
@@ -127,12 +128,12 @@ public class JwtAuthFilter<P extends Principal> extends AuthFilter<JwtContext, P
      *
      * @param <P> the principal
      */
-    public static class Builder<P extends Principal> extends AuthFilterBuilder<JwtContext, P, JwtAuthFilter<P>> {
+    public static class Builder<P extends Principal> extends AuthFilterBuilder<JWTClaimsSet, P, JwtAuthFilter<P>> {
 
-        private JwtConsumer consumer;
+        private JWTProcessor<com.nimbusds.jose.proc.SecurityContext> consumer;
         private String cookieName;
 
-        public Builder<P> setJwtConsumer(JwtConsumer consumer) {
+        public Builder<P> setJwtConsumer(JWTProcessor<com.nimbusds.jose.proc.SecurityContext> consumer) {
             this.consumer = consumer;
             return this;
         }
@@ -145,7 +146,7 @@ public class JwtAuthFilter<P extends Principal> extends AuthFilter<JwtContext, P
         @Override
         protected JwtAuthFilter<P> newInstance() {
             checkNotNull(consumer, "JwtConsumer is not set");
-            return new JwtAuthFilter<>(consumer, cookieName);
+            return new JwtAuthFilter<P>(consumer, cookieName);
         }
     }
 }

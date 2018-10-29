@@ -2,42 +2,55 @@ package com.github.toastshaman.dropwizard.auth.jwt;
 
 import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableList;
+import com.nimbusds.jose.*;
+import com.nimbusds.jose.crypto.MACSigner;
+import com.nimbusds.jose.jwk.source.ImmutableSecret;
+import com.nimbusds.jose.jwk.source.JWKSource;
+import com.nimbusds.jose.proc.JWSKeySelector;
+import com.nimbusds.jose.proc.JWSVerificationKeySelector;
+import com.nimbusds.jose.proc.SecurityContext;
+import com.nimbusds.jwt.JWTClaimsSet;
+import com.nimbusds.jwt.proc.ConfigurableJWTProcessor;
+import com.nimbusds.jwt.proc.DefaultJWTProcessor;
 import io.dropwizard.jersey.DropwizardResourceConfig;
-import org.jose4j.jws.JsonWebSignature;
-import org.jose4j.jwt.JwtClaims;
-import org.jose4j.jwt.NumericDate;
-import org.jose4j.jwt.consumer.JwtConsumer;
-import org.jose4j.jwt.consumer.JwtConsumerBuilder;
-import org.jose4j.keys.HmacKey;
-import org.jose4j.lang.JoseException;
 import org.junit.Test;
 
 import javax.ws.rs.WebApplicationException;
 import javax.ws.rs.container.ContainerRequestFilter;
+import java.nio.charset.StandardCharsets;
+import java.sql.Date;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.Base64;
 
-import static com.google.common.base.Charsets.UTF_8;
 import static javax.ws.rs.core.HttpHeaders.AUTHORIZATION;
 import static javax.ws.rs.core.HttpHeaders.WWW_AUTHENTICATE;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.failBecauseExceptionWasNotThrown;
-import static org.jose4j.jws.AlgorithmIdentifiers.HMAC_SHA512;
 
 public class JwtAuthProviderTest extends AuthBaseTest<JwtAuthProviderTest.JwtAuthTestResourceConfig> {
 
-    private static final String SECRET_KEY = "MySecretKey";
+    private static final byte[] SECRET = Base64.getDecoder().decode("vZMLblzWrdFRLAClXetwIjL8mPccjdjxjQidkJFGybYGkdJhu4GmzUsfmMcwsAokXE7a0y1ryhsVndXrKYQ50g==");
 
     static class JwtAuthTestResourceConfig extends AuthBaseResourceConfig {
         protected ContainerRequestFilter getAuthFilter() {
 
-            final JwtConsumer consumer = new JwtConsumerBuilder()
-                .setRequireExpirationTime() // the JWT must have an expiration time
-                .setAllowedClockSkewInSeconds(30) // allow some leeway in validating time based claims to account for clock skew
-                .setRequireSubject() // the JWT must have a subject claim
-                .setExpectedIssuer("Issuer") // whom the JWT needs to have been issued by
-                .setExpectedAudience("Audience") // whom the JWT needs to have been issued by
-                .setVerificationKey(new HmacKey(SECRET_KEY.getBytes(UTF_8))) // verify the signature with the public key
-                .setRelaxVerificationKeyValidation() // relaxes key length requirement
-                .build();// create the JwtConsumer instance
+            final ConfigurableJWTProcessor<SecurityContext> consumer = new DefaultJWTProcessor<>();
+
+            JWKSource<SecurityContext> keySource = new ImmutableSecret<>(SECRET);
+            JWSKeySelector<SecurityContext> keySelector = new JWSVerificationKeySelector<>(JWSAlgorithm.HS256, keySource);
+            consumer.setJWSKeySelector(keySelector);
+
+
+//            final JwtConsumer consumer = new JwtConsumerBuilder()
+//                .setRequireExpirationTime() // the JWT must have an expiration time
+//                .setAllowedClockSkewInSeconds(30) // allow some leeway in validating time based claims to account for clock skew
+//                .setRequireSubject() // the JWT must have a subject claim
+//                .setExpectedIssuer("Issuer") // whom the JWT needs to have been issued by
+//                .setExpectedAudience("Audience") // whom the JWT needs to have been issued by
+//                .setVerificationKey(new HmacKey(SECRET_KEY.getBytes(UTF_8))) // verify the signature with the public key
+//                .setRelaxVerificationKeyValidation() // relaxes key length requirement
+//                .build();// create the JwtConsumer instance
 
             return new JwtAuthFilter.Builder<>()
                 .setCookieName(COOKIE_NAME)
@@ -92,54 +105,54 @@ public class JwtAuthProviderTest extends AuthBaseTest<JwtAuthProviderTest.JwtAut
 
     @Override
     protected String getOrdinaryGuyValidToken() {
-        return toToken(withKey(SECRET_KEY), claimsForUser(ORDINARY_USER));
+        return toToken(SECRET, claimsForUser(ORDINARY_USER));
     }
 
     @Override
     protected String getOrdinaryGuyExpiredToken() {
-        final JwtClaims claims = claimsForUser(ORDINARY_USER);
-        claims.setExpirationTime(NumericDate.fromSeconds(-10));
-        return toToken(withKey(SECRET_KEY), claims);
+        final JWTClaimsSet.Builder claims = claimsForUser(ORDINARY_USER);
+        claims.expirationTime(Date.from(Instant.now().minus(10, ChronoUnit.SECONDS)));
+        return toToken(SECRET, claims);
     }
 
     @Override
     protected String getGoodGuyValidToken() {
-        return toToken(withKey(SECRET_KEY), claimsForUser(ADMIN_USER));
+        return toToken(SECRET, claimsForUser(ADMIN_USER));
     }
 
     @Override
     protected String getBadGuyToken() {
-        return toToken(withKey(SECRET_KEY), claimsForUser(BADGUY_USER));
+        return toToken(SECRET, claimsForUser(BADGUY_USER));
     }
 
     @Override
     protected String getInvalidToken() {
-        return toToken(withKey("DERP"), claimsForUser(BADGUY_USER));
+        byte[] invalidKey = Base64.getDecoder().decode("nOFk+pMZ6+/krRXRBpu9sN4D4oEQKZo6I2Nbfx5whjIKKldkGn02LdA8KIgEnvvNiKfmOzLs6JLm0Z85eEqivw==");
+        return toToken(invalidKey, claimsForUser(BADGUY_USER));
     }
 
-    private JwtClaims claimsForUser(String user) {
-        final JwtClaims claims = new JwtClaims();
-        claims.setExpirationTimeMinutesInTheFuture(5);
-        claims.setSubject(user);
-        claims.setIssuer("Issuer");
-        claims.setAudience("Audience");
+    private JWTClaimsSet.Builder claimsForUser(String user) {
+        final JWTClaimsSet.Builder claims = new JWTClaimsSet.Builder();
+        claims.expirationTime(Date.from(Instant.now().plus(5, ChronoUnit.MINUTES)));
+        claims.subject(user);
+        claims.issuer("Issuer");
+        claims.audience("Audience");
         return claims;
     }
 
-    private String toToken(byte[] key, JwtClaims claims) {
-        final JsonWebSignature jws = new JsonWebSignature();
-        jws.setPayload(claims.toJson());
-        jws.setAlgorithmHeaderValue(HMAC_SHA512);
-        jws.setKey(new HmacKey(key));
-        jws.setDoKeyValidation(false);
-
+    private String toToken(byte[] key, JWTClaimsSet.Builder claims) {
         try {
-            return jws.getCompactSerialization();
+            JWSSigner signer = new MACSigner(key);
+
+            // Prepare JWS object with "Hello, world!" payload
+            JWSObject jwsObject = new JWSObject(new JWSHeader(JWSAlgorithm.HS256), new Payload(claims.build().toJSONObject()));
+
+            // Apply the HMAC
+            jwsObject.sign(signer);
+
+            return jwsObject.serialize();
         }
-        catch (JoseException e) { throw Throwables.propagate(e); }
+        catch (JOSEException e) { throw Throwables.propagate(e); }
     }
 
-    private byte[] withKey(String key) {
-        return key.getBytes(UTF_8);
-    }
 }
